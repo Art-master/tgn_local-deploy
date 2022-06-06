@@ -1,4 +1,4 @@
-version: '3.7'
+version: '3.8'
 
 services:
   grafana:
@@ -8,8 +8,14 @@ services:
     volumes:
       - ./grafana:/var/lib/grafana
     environment:
-      - GF_SECURITY_ADMIN_USER=admin
-      - GF_SECURITY_ADMIN_PASSWORD=admin
+      GF_SECURITY_ADMIN_USER: "admin"
+      GF_SECURITY_ADMIN_PASSWORD: "admin"
+      GF_SMTP_ENABLED: "true"
+      GF_SMTP_HOST: "smtp.gmail.com:587"
+      GF_SMTP_USER: "art.master.app@gmail.com"
+      GF_SMTP_PASSWORD: "dsf7376Go7289904"
+      GF_SMTP_SKIP_VERIFY: "true"
+      GF_SMTP_FROM_ADDRESS: "art.master.app@gmail.com"
     networks:
       monitoring:
         aliases:
@@ -25,5 +31,81 @@ services:
       monitoring:
         aliases:
           - prometheus
+  jaeger:
+    image: jaegertracing/all-in-one:1.35
+    ports:
+      - 6831:6831/udp
+      - 6832:6832/udp
+      - 16686:16686
+      - 14268:14268
+
+  elasticsearch:
+    image: amazon/opendistro-for-elasticsearch:1.13.2
+    container_name: elasticsearch
+    environment:
+      bootstrap.memory_lock: "true"
+      ES_JAVA_OPTS: "-Xms512m -Xmx512m"
+      discovery.type: single-node
+    volumes:
+      - ./elasticsearch:/usr/share/elasticsearch/data
+    ports:
+      - 9200:9200
+      - 9600:9600 # required for Performance Analyzer
+    networks:
+      docker-elk:
+
+  kibana:
+    image: amazon/opendistro-for-elasticsearch-kibana:1.13.2
+    container_name: kibana
+    environment:
+      ELASTICSEARCH_URL: "https://elasticsearch:9200"
+      ELASTICSEARCH_HOSTS: "https://elasticsearch:9200"
+    ports:
+      - 5601:5601
+    expose:
+      - "5601"
+    networks:
+      docker-elk:
+    depends_on:
+      - elasticsearch
+
+  # MongoDB for graylog: https://hub.docker.com/_/mongo/
+  mongo:
+    image: mongo:4.2
+    container_name: mongo_for_graylog
+    networks:
+      - docker-elk
+  # Graylog: https://hub.docker.com/r/graylog/graylog/
+  graylog:
+    image: graylog/graylog:4.2
+    container_name: graylog
+    environment:
+      # CHANGE ME (must be at least 16 characters)!
+      GRAYLOG_PASSWORD_SECRET: somepasswordpepper
+      # Password: admin
+      GRAYLOG_ROOT_PASSWORD_SHA2: 8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918
+      GRAYLOG_HTTP_EXTERNAL_URI: http://127.0.0.1:9000/
+      GRAYLOG_ELASTICSEARCH_VERSION: 7
+    entrypoint: /usr/bin/tini -- wait-for-it elasticsearch:9200 --  /docker-entrypoint.sh
+    networks:
+      - docker-elk
+    restart: always
+    depends_on:
+      - mongo
+      - elasticsearch
+    ports:
+      # Graylog web interface and REST API
+      - 9000:9000
+      # Syslog TCP
+      - 1514:1514
+      # Syslog UDP
+      - 1514:1514/udp
+      # GELF TCP
+      - 12201:12201
+      # GELF UDP
+      - 12201:12201/udp
+
 networks:
+  docker-elk:
+    driver: bridge
   monitoring:
