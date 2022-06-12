@@ -1,8 +1,42 @@
 version: '3.8'
 
 services:
+  # KEYCLOACK
+  postgres:
+    container_name: postgres
+    image: postgres:13
+    volumes:
+      - ./postgres-data:/var/lib/postgresql/data
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: keycloak_db
+    ports:
+      - "5435:5432"
+    command: -p 5435
+    restart: unless-stopped
+
+  keycloak:
+    image: jboss/keycloak
+    container_name: keycloak
+    environment:
+      DB_VENDOR: POSTGRES
+      DB_ADDR: "postgres:5435"
+      DB_DATABASE: keycloak_db
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      KEYCLOAK_USER: admin
+      KEYCLOAK_PASSWORD: admin_password
+    ports:
+      - "8484:8080"
+    depends_on:
+      - postgres
+    links:
+      - "postgres:postgres"
+  # METRICS
   grafana:
     build: './config/grafana'
+    container_name: ografana
     ports:
       - 3000:3000
     volumes:
@@ -22,6 +56,7 @@ services:
           - grafana
   prometheus:
     image: prom/prometheus
+    container_name: prometheus
     ports:
       - 9090:9090
     volumes:
@@ -33,79 +68,84 @@ services:
           - prometheus
   jaeger:
     image: jaegertracing/all-in-one:1.35
+    container_name: jaeger
     ports:
       - 6831:6831/udp
       - 6832:6832/udp
       - 16686:16686
       - 14268:14268
 
-  elasticsearch:
-    image: amazon/opendistro-for-elasticsearch:1.13.2
-    container_name: elasticsearch
+  opensearch:
+    image: opensearchproject/opensearch:latest
+    container_name: opensearch
     environment:
-      bootstrap.memory_lock: "true"
-      ES_JAVA_OPTS: "-Xms512m -Xmx512m"
+      bootstrap.memory_lock: "true" # along with the memlock settings below, disables swapping
+      plugins.security.ssl.http.enabled: "false"
+      OPENSEARCH_JAVA_OPTS: "-Xms2g -Xmx2g" # minimum and maximum Java heap size, recommend setting both to 50% of system RAM
       discovery.type: single-node
     volumes:
-      - ./elasticsearch:/usr/share/elasticsearch/data
+      - ./opensearch-data:/usr/share/opensearch/data
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+      nofile:
+        soft: 65536 # maximum number of open files for the OpenSearch user, set to at least 65536 on modern systems
+        hard: 65536
     ports:
       - 9200:9200
       - 9600:9600 # required for Performance Analyzer
     networks:
-      docker-elk:
+      opensearch-net:
 
-  kibana:
-    image: amazon/opendistro-for-elasticsearch-kibana:1.13.2
-    container_name: kibana
+  opensearch-dashboards:
+    image: opensearchproject/opensearch-dashboards:latest
+    container_name: opensearch-dashboards
     environment:
-      ELASTICSEARCH_URL: "https://elasticsearch:9200"
-      ELASTICSEARCH_HOSTS: "https://elasticsearch:9200"
+      OPENSEARCH_URL: "https://opensearch:9200"
+      OPENSEARCH_HOSTS: "https://opensearch:9200"
     ports:
       - 5601:5601
     expose:
       - "5601"
     networks:
-      docker-elk:
+      opensearch-net:
     depends_on:
-      - elasticsearch
-
-  # MongoDB for graylog: https://hub.docker.com/_/mongo/
-  mongo:
-    image: mongo:4.2
-    container_name: mongo_for_graylog
-    networks:
-      - docker-elk
-  # Graylog: https://hub.docker.com/r/graylog/graylog/
-  graylog:
-    image: graylog/graylog:4.2
-    container_name: graylog
-    environment:
-      # CHANGE ME (must be at least 16 characters)!
-      GRAYLOG_PASSWORD_SECRET: somepasswordpepper
-      # Password: admin
-      GRAYLOG_ROOT_PASSWORD_SHA2: 8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918
-      GRAYLOG_HTTP_EXTERNAL_URI: http://127.0.0.1:9000/
-      GRAYLOG_ELASTICSEARCH_VERSION: 7
-    entrypoint: /usr/bin/tini -- wait-for-it elasticsearch:9200 --  /docker-entrypoint.sh
-    networks:
-      - docker-elk
-    restart: always
-    depends_on:
-      - mongo
-      - elasticsearch
+      - opensearch
+  # Logstash with plugin for opensearch
+  logstash:
+    image: opensearchproject/logstash-oss-with-opensearch-output-plugin:latest
+    container_name: logstash
+    #command: logstash -f /etc/logstash/conf.d/gateway_pipeline.conf
+    volumes:
+      - ./config/logstash/pipelines.yml:/usr/share/logstash/config/pipelines.yml:ro
+      - ./config/logstash/pipelines:/usr/share/logstash/config/pipelines:ro
     ports:
-      # Graylog web interface and REST API
-      - 9000:9000
-      # Syslog TCP
-      - 1514:1514
-      # Syslog UDP
-      - 1514:1514/udp
-      # GELF TCP
-      - 12201:12201
-      # GELF UDP
-      - 12201:12201/udp
+      - "5044:5044"
+    environment:
+      PATH_CONFIG: "/usr/share/logstash/pipeline/*.conf"
+      LS_JAVA_OPTS: "-Xmx256m -Xms256m"
+    networks:
+      - opensearch-net
+    depends_on:
+      - opensearch
+  filebit:
+    image: elastic/filebeat:8.2.2
+    container_name: filebit
+    #volumes:
+      # заменяем конфигурационный файл в контейнере
+      #- ./filebeat.docker.yml:/usr/share/filebeat/filebeat.yml:ro
+      # подключаем volume с лог-файлами в контейнер
+      # - app-logs:/var/app/log
+  #Own services
+  gateway:
+    build: ../gateway/.
+    image: gateway
+    container_name: gateway
+    ports:
+      - 8090:8090
 
 networks:
-  docker-elk:
+  opensearch-net:
     driver: bridge
   monitoring:

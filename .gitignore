@@ -1,4 +1,7 @@
 /grafana/
 /prometheus/
 /elasticsearch/
+/opensearch-data/
 /.idea/
+/postgres-data/
+.local.env

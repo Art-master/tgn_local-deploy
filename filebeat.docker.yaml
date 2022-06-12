@@ -1,0 +1,20 @@
+ilebeat.autodiscover:
+  providers:
+    # искать docker контейнер
+    - type: docker
+      templates:
+        - condition:
+            contains:
+              # имя которого fastapi_app
+              docker.container.name: fastapi_app
+          # определим конфигурацию сбора для этого контейнера
+          config:
+            - type: container
+              paths:
+                - /var/lib/docker/containers/${data.docker.container.id}/*.log
+              # исключим лог-сообщения asgi-сервера
+              exclude_lines: ["^INFO:"]
+
+# Пока будем выводить лог-сообщения в консоль
+output.console:
+  pretty: true
