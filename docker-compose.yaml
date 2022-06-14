@@ -15,6 +15,8 @@ services:
       - "5435:5432"
     command: -p 5435
     restart: unless-stopped
+    networks:
+      - keycloak-net
 
   keycloak:
     image: jboss/keycloak
@@ -27,12 +29,24 @@ services:
       DB_PASSWORD: postgres
       KEYCLOAK_USER: admin
       KEYCLOAK_PASSWORD: admin_password
+      PROXY_ADDRESS_FORWARDING: "true"
+    volumes:
+      - keycloak:/var/lib/keycloak/data
+      #- ./keycloak/realm-export.json:/opt/jboss/keycloak/realm-export.json
     ports:
-      - "8484:8080"
+      - "8484:8484"
+    expose:
+      - 8484
+    command:
+      - "-b 0.0.0.0"
+      - "-Djboss.http.port=8484"
+      #- "-Dkeycloak.import=/opt/jboss/keycloak/realm-export.json"
     depends_on:
       - postgres
     links:
       - "postgres:postgres"
+    networks:
+      - keycloak-net
   # METRICS
   grafana:
     build: './config/grafana'
@@ -76,13 +90,13 @@ services:
       - 14268:14268
 
   opensearch:
-    image: opensearchproject/opensearch:latest
+    image: opensearchproject/opensearch:2.0.0
     container_name: opensearch
     environment:
+      discovery.type: single-node
       bootstrap.memory_lock: "true" # along with the memlock settings below, disables swapping
       plugins.security.ssl.http.enabled: "false"
-      OPENSEARCH_JAVA_OPTS: "-Xms2g -Xmx2g" # minimum and maximum Java heap size, recommend setting both to 50% of system RAM
-      discovery.type: single-node
+      OPENSEARCH_JAVA_OPTS: "-Xms4g -Xmx4g" # minimum and maximum Java heap size, recommend setting both to 50% of system RAM
     volumes:
       - ./opensearch-data:/usr/share/opensearch/data
     ulimits:
@@ -96,25 +110,25 @@ services:
       - 9200:9200
       - 9600:9600 # required for Performance Analyzer
     networks:
-      opensearch-net:
+      - opensearch-net
 
   opensearch-dashboards:
-    image: opensearchproject/opensearch-dashboards:latest
+    image: opensearchproject/opensearch-dashboards:2.0.0
     container_name: opensearch-dashboards
     environment:
-      OPENSEARCH_URL: "https://opensearch:9200"
-      OPENSEARCH_HOSTS: "https://opensearch:9200"
+      # if use https then boards do not starting. Need additional settings
+      OPENSEARCH_HOSTS: '["http://opensearch:9200"]'
     ports:
       - 5601:5601
     expose:
       - "5601"
     networks:
-      opensearch-net:
+      - opensearch-net
     depends_on:
       - opensearch
   # Logstash with plugin for opensearch
   logstash:
-    image: opensearchproject/logstash-oss-with-opensearch-output-plugin:latest
+    image: opensearchproject/logstash-oss-with-opensearch-output-plugin:7.16.3
     container_name: logstash
     #command: logstash -f /etc/logstash/conf.d/gateway_pipeline.conf
     volumes:
@@ -142,10 +156,29 @@ services:
     build: ../gateway/.
     image: gateway
     container_name: gateway
+    restart: on-failure
     ports:
       - 8090:8090
+    environment:
+      - APP_PORT=${APP_PORT}
+      - TREE_DATA_SERVICE_ADDR=${TREE_DATA_SERVICE_ADDR}
+      - KEYCLOAK_ADDR=${KEYCLOAK_ADDR}
+      - KEYCLOAK_HOST=keycloak
+      - KEYCLOAK_PORT=${KEYCLOAK_PORT}
+    links:
+      - keycloak
+    depends_on:
+      - keycloak
+    networks:
+      - keycloak-net
+
+volumes:
+  postgres:
+  keycloak:
 
 networks:
+  keycloak-net:
+    driver: bridge
   opensearch-net:
     driver: bridge
   monitoring:

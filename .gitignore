@@ -4,4 +4,4 @@
 /opensearch-data/
 /.idea/
 /postgres-data/
-.local.env
+.env
