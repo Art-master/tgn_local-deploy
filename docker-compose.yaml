@@ -1,6 +1,7 @@
 version: '3.8'
 
 services:
+
   # KEYCLOACK
   postgres:
     container_name: postgres
@@ -47,10 +48,11 @@ services:
       - "postgres:postgres"
     networks:
       - keycloak-net
+
   # METRICS
   grafana:
     build: './config/grafana'
-    container_name: ografana
+    container_name: grafana
     ports:
       - 3000:3000
     volumes:
@@ -126,14 +128,15 @@ services:
       - opensearch-net
     depends_on:
       - opensearch
+
   # Logstash with plugin for opensearch
   logstash:
     image: opensearchproject/logstash-oss-with-opensearch-output-plugin:7.16.3
     container_name: logstash
     #command: logstash -f /etc/logstash/conf.d/gateway_pipeline.conf
     volumes:
-      - ./config/logstash/pipelines.yml:/usr/share/logstash/config/pipelines.yml:ro
-      - ./config/logstash/pipelines:/usr/share/logstash/config/pipelines:ro
+      - ./config/logstash/logstash.conf:/usr/share/logstash/pipeline/logstash.conf
+      - ./config/logstash/logstash.template.json:/usr/share/logstash/templates/logstash.template.json
     ports:
       - "5044:5044"
     environment:
@@ -143,14 +146,23 @@ services:
       - opensearch-net
     depends_on:
       - opensearch
-  filebit:
+
+  # Filebeat. One for all docker containers
+  filebeat:
     image: elastic/filebeat:8.2.2
-    container_name: filebit
-    #volumes:
-      # заменяем конфигурационный файл в контейнере
-      #- ./filebeat.docker.yml:/usr/share/filebeat/filebeat.yml:ro
-      # подключаем volume с лог-файлами в контейнер
-      # - app-logs:/var/app/log
+    container_name: filebeat
+    # suppress container permission error
+    command: filebeat -e -strict.perms=false
+    volumes:
+      - ./config/filebeat.docker.yml:/usr/share/filebeat/filebeat.yml:ro   # Configuration file ":ro" is read only mount
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro           # Docker logs
+      - /var/run/docker.sock:/var/run/docker.sock:ro                       # Additional information about containers
+    user: root                                                             # Allow access to log files and docker.sock
+    restart: on-failure
+    depends_on:
+      - logstash
+    networks:
+      - opensearch-net
   #Own services
   gateway:
     build: ../gateway/.
@@ -159,18 +171,19 @@ services:
     restart: on-failure
     ports:
       - 8090:8090
+    expose:
+      - "8090"
     environment:
       - APP_PORT=${APP_PORT}
       - TREE_DATA_SERVICE_ADDR=${TREE_DATA_SERVICE_ADDR}
       - KEYCLOAK_ADDR=${KEYCLOAK_ADDR}
       - KEYCLOAK_HOST=keycloak
       - KEYCLOAK_PORT=${KEYCLOAK_PORT}
-    links:
-      - keycloak
     depends_on:
       - keycloak
     networks:
       - keycloak-net
+      - opensearch-net
 
 volumes:
   postgres:
