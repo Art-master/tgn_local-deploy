@@ -1,7 +1,8 @@
-/grafana/
-/prometheus/
+/.data/grafana/
+/.data/prometheus/
 /elasticsearch/
-/opensearch-data/
+/.data/opensearch-data/
 /.idea/
-/postgres-data/
+/.data/
+/keycloack/
 .env
