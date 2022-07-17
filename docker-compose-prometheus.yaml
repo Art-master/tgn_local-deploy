@@ -1,0 +1,47 @@
+version: '3.8'
+
+services:
+
+  grafana:
+    build: './config/grafana'
+    container_name: grafana
+    ports:
+      - 3000:3000
+    volumes:
+      - ./.data/grafana:/var/lib/grafana
+    environment:
+      GF_SECURITY_ADMIN_USER: "admin"
+      GF_SECURITY_ADMIN_PASSWORD: "admin"
+      GF_SMTP_ENABLED: "true"
+      GF_SMTP_HOST: "smtp.gmail.com:587"
+      GF_SMTP_USER: "art.master.app@gmail.com"
+      GF_SMTP_PASSWORD: "dsf7376Go7289904"
+      GF_SMTP_SKIP_VERIFY: "true"
+      GF_SMTP_FROM_ADDRESS: "art.master.app@gmail.com"
+    networks:
+      monitoring:
+        aliases:
+          - grafana
+  prometheus:
+    image: prom/prometheus
+    container_name: prometheus
+    ports:
+      - 9090:9090
+    volumes:
+      - ./config/prometheus.yml:/etc/prometheus/prometheus.yml
+      - ./.data/prometheus:/prometheus
+    networks:
+      monitoring:
+        aliases:
+          - prometheus
+  jaeger:
+    image: jaegertracing/all-in-one:1.35
+    container_name: jaeger
+    ports:
+      - 6831:6831/udp
+      - 6832:6832/udp
+      - 16686:16686
+      - 14268:14268
+
+networks:
+  monitoring:

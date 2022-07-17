@@ -1,0 +1,84 @@
+version: '3.8'
+
+services:
+
+  opensearch:
+    image: opensearchproject/opensearch:2.0.0
+    container_name: opensearch
+    environment:
+      discovery.type: single-node
+      bootstrap.memory_lock: "true" # along with the memlock settings below, disables swapping
+      plugins.security.ssl.http.enabled: "false"
+      OPENSEARCH_JAVA_OPTS: "-Xms4g -Xmx4g" # minimum and maximum Java heap size, recommend setting both to 50% of system RAM
+    volumes:
+      - ./.data/opensearch-data:/usr/share/opensearch/data
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+      nofile:
+        soft: 65536 # maximum number of open files for the OpenSearch user, set to at least 65536 on modern systems
+        hard: 65536
+    ports:
+      - 9200:9200
+      - 9600:9600 # required for Performance Analyzer
+    networks:
+      - opensearch-net
+
+  opensearch-dashboards:
+    image: opensearchproject/opensearch-dashboards:2.0.0
+    container_name: opensearch-dashboards
+    environment:
+      # if use https then boards do not starting. Need additional settings
+      OPENSEARCH_HOSTS: '["http://opensearch:9200"]'
+    ports:
+      - 5601:5601
+    expose:
+      - "5601"
+    networks:
+      - opensearch-net
+    depends_on:
+      - opensearch
+
+  # Logstash with plugin for opensearch
+  logstash:
+    image: opensearchproject/logstash-oss-with-opensearch-output-plugin:7.16.3
+    container_name: logstash
+    #command: logstash -f /etc/logstash/conf.d/gateway_pipeline.conf
+    volumes:
+      - ./config/logstash/logstash.conf:/usr/share/logstash/pipeline/logstash.conf
+      - ./config/logstash/logstash.template.json:/usr/share/logstash/templates/logstash.template.json
+    ports:
+      - "5044:5044"
+    environment:
+      PATH_CONFIG: "/usr/share/logstash/pipeline/*.conf"
+      LS_JAVA_OPTS: "-Xmx256m -Xms256m"
+    networks:
+      - opensearch-net
+    depends_on:
+      - opensearch
+
+  # Filebeat. One for all docker containers
+  filebeat:
+    image: elastic/filebeat:8.2.2
+    container_name: filebeat
+    # suppress container permission error
+    command: filebeat -e -strict.perms=false
+    volumes:
+      - ./config/filebeat.docker.yml:/usr/share/filebeat/filebeat.yml:ro   # Configuration file ":ro" is read only mount
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro           # Docker logs
+      - /var/run/docker.sock:/var/run/docker.sock:ro                       # Additional information about containers
+    user: root                                                             # Allow access to log files and docker.sock
+    restart: on-failure
+    depends_on:
+      - logstash
+    networks:
+      - opensearch-net
+
+volumes:
+  postgres:
+  keycloak:
+
+networks:
+  opensearch-net:
+    driver: bridge
