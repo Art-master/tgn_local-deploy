@@ -1,6 +1,6 @@
 {
   "id": "Genappline",
-  "realm": "Genappline",
+  "realm": "genappline-realm",
   "notBefore": 0,
   "defaultSignatureAlgorithm": "RS256",
   "revokeRefreshToken": false,
